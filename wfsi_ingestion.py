@@ -12,6 +12,11 @@ load_dotenv()
 apiKey = os.environ['apiKey']
 ckan = RemoteCKAN('https://wifire-data.sdsc.edu/', apikey=apiKey)
 
+# ckan.action.package_delete(id='test_pyrolysis_gases_measured_by_ftir_spectroscopy_in_a_wind_tunnel_and_at_ft_jackson_sc')
+# ckan.action.package_delete(id='test_pyrolysis_gases_produced_by_fast_and_slow_pyrolysis_of_foliage_samples_from_15_plants_common_to')
+# ckan.action.package_delete(id='test_field_measurements_of_coarse_wood_duff_litter_and_trees_for_the_eglin_air_force_base_2023_fuels')
+# ckan.action.package_delete(id='test_pyrolysis_gases_measured_by_gas_chromatography_and_mass_spectrometry_from_fires_in_a_wind_tunne')
+
 url = 'https://wfsi-data.org/catalog/d1/mn/v2/query/solr/?q=%20-obsoletedBy:*%20AND%20%20-formatId:*dataone.org%5C%2Fcollections*%20AND%20%20-formatId:*dataone.org%5C%2Fportals*%20AND%20formatType:METADATA&fl=id,seriesId,title,origin,pubDate,dateUploaded,abstract,resourceMap,beginDate,endDate,read_count_i,geohash_9,datasource,isPublic,documents,sem_annotation,northBoundCoord,southBoundCoord,eastBoundCoord,westBoundCoord&sort=dateUploaded+desc&rows=25&start=0&facet=true&facet.sort=index&facet.field=geohash_2&facet.mincount=1&facet.limit=-1&wt=json'
 response = requests.get(url).json()
 results = response['response']
@@ -19,7 +24,7 @@ results = [x for x in results['docs'] if x['isPublic']]
 
 
 for res in results:
-
+    
     # fetch metadata file
     encoded = urllib.parse.quote(f'''(id="{res['id']}" OR seriesId="{res['id']}")''') 
     url = 'https://wfsi-data.org/catalog/d1/mn/v2/query/solr/?q=' + encoded + '&fl=abstract,id,seriesId,fileName,resourceMap,formatType,formatId,obsoletedBy,isDocumentedBy,documents,title,origin,keywords,attributeName,pubDate,eastBoundCoord,westBoundCoord,northBoundCoord,southBoundCoord,beginDate,endDate,dateUploaded,archived,datasource,replicaMN,isAuthorized,isPublic,size,read_count_i,isService,serviceTitle,serviceEndpoint,serviceOutput,serviceDescription,serviceType,project,dateModified&wt=json&rows=1000&archived=archived:*'
@@ -44,13 +49,27 @@ for res in results:
     license = dataset.find('intellectualRights').find('para').text
 
     # get bounding box information
-    coverage = dataset.find('coverage').find('geographicCoverage').find('boundingCoordinates')
+    coverages = dataset.find('coverage').findall('geographicCoverage')
+    coordinates = []
 
-    westBoundingCoordinate = float(coverage.find('westBoundingCoordinate').text)
-    eastBoundingCoordinate = float(coverage.find('eastBoundingCoordinate').text)
-    northBoundingCoordinate = float(coverage.find('northBoundingCoordinate').text)
-    southBoundingCoordinate = float(coverage.find('southBoundingCoordinate').text)
+    westBoundingCoordinates = []
+    eastBoundingCoordinates = []
+    northBoundingCoordinates = []
+    southBoundingCoordinates = []
 
+    for bbox_coverage in coverages:
+        coverage = bbox_coverage.find('boundingCoordinates')
+        westBoundingCoordinates.append(float(coverage.find('westBoundingCoordinate').text))
+        eastBoundingCoordinates.append(float(coverage.find('eastBoundingCoordinate').text))
+        northBoundingCoordinates.append(float(coverage.find('northBoundingCoordinate').text))
+        southBoundingCoordinates.append(float(coverage.find('southBoundingCoordinate').text))
+
+    westBoundingCoordinate = min(westBoundingCoordinates)
+    eastBoundingCoordinate = max(eastBoundingCoordinates)
+    northBoundingCoordinate = max(northBoundingCoordinates)
+    southBoundingCoordinate = min(southBoundingCoordinates)
+
+        
     bbox = {"type": "Polygon", 
         "coordinates":  [[[eastBoundingCoordinate, southBoundingCoordinate  ],
                             [ westBoundingCoordinate, southBoundingCoordinate ],
@@ -68,20 +87,18 @@ for res in results:
     # point of contact information 
     poc = dataset.find('contact')
 
-    maintainer = {}
+    maintainer = []
 
     if poc.find('individualName').find('givenName') is not None \
         and poc.find('individualName').find('surName') is not None:
 
-        maintainer = {
-            'maintainor' : poc.find('individualName').find('givenName').text + ' ' + poc.find('individualName').find('surName').text
-            }
+        maintainer.append(poc.find('individualName').find('givenName').text + ' ' + poc.find('individualName').find('surName').text)
         
     if poc.find('electronicMailAddress') is not None:
-       maintainer['maintainor_email'] =  poc.find('electronicMailAddress').text
+       maintainer.append(poc.find('electronicMailAddress').text)
 
     if poc.find('orcid') is not None:
-        maintainer['orcid'] = poc.find('userId').text
+        maintainer.append(poc.find('userId').text)
 
 
     # extract methods
@@ -91,21 +108,45 @@ for res in results:
 
     # list creater information
     creaters = dataset.findall('creator')
-    creator_json = []
+    creator_text = []
 
     for creater in creaters:
-        info = {}
-        info['creator_name'] = creater.find('individualName').find('givenName').text + ' ' + creater.find('individualName').find('surName').text
+        info = []
+        info.append(creater.find('individualName').find('givenName').text + ' ' + creater.find('individualName').find('surName').text)
         if creater.find('electronicMailAddress') is not None:
-            info['creator_info'] = creater.find('electronicMailAddress').text
+            info.append(creater.find('electronicMailAddress').text)
 
         if creater.find('organizationName') is not None:
-            info['organizationName'] = creater.find('organizationName').text
+            info.append(creater.find('organizationName').text)
 
         if creater.find('userId') is not None:
-            info['orcid'] = creater.find('userId').text
+            info.append(creater.find('userId').text)
 
-        creator_json.append(info)
+        info_text = ", ".join(info)
+        creator_text.append(info_text)
+
+    # list associatedParty information
+    associated_party = dataset.findall('associatedParty')
+    associated_party_text = []
+
+    for ap in associated_party:
+        info = []
+        info.append(ap.find('individualName').find('givenName').text + ' ' + ap.find('individualName').find('surName').text)
+        if ap.find('electronicMailAddress') is not None:
+            info.append(ap.find('electronicMailAddress').text)
+
+        if ap.find('organizationName') is not None:
+            info.append(ap.find('organizationName').text)
+
+        if ap.find('userId') is not None:
+            info.append(ap.find('userId').text)
+
+        if ap.find('role') is not None:
+            info.append(ap.find('role').text)
+
+        info_text = ", ".join(info)
+        associated_party_text.append(info_text)    
+
 
     extra_fields = [
         {
@@ -126,18 +167,63 @@ for res in results:
         }
     ]
     
-    if len(creator_json) > 0:
+    if len(creator_text) > 0:
         extra_fields.append({
-            "value" : json.dumps(creator_json),
+            "value" :' | '.join(creator_text),
             "key" : "creators"
         })
 
-    if len(maintainer.keys()) > 0:
+    if len(maintainer) > 0:
         extra_fields.append({
-            "value" : json.dumps(maintainer),
+            "value" : ", ".join(maintainer),
             "key" : "maintainor"
         })
 
+    if len(associated_party_text) > 0:
+        extra_fields.append({
+            "value" : " | ".join(associated_party_text),
+            "key" : "associated_parties"
+        })    
+
+    project = dataset.find('project')
+
+    if project is not None:
+        extra_fields.append({
+            "value" : project.find('title').text,
+            "key" : "project"
+        })
+
+        award = project.find('award')
+        if award is not None:
+            extra_fields.append({
+                "value" : award.find('title').text,
+                "key" : "award"
+            })
+             
+            award_number = award.find('award_number')
+            if award_number is not None:
+                extra_fields.append({
+                    "value" : award_number.text,
+                    "key" : "award_number"
+                })
+
+            funder_name = award.find('funderName')
+            if funder_name is not None:
+                funder = funder_name.text
+
+                funderIdentifier = award.find('funderIdentifier')
+                if funderIdentifier is not None:
+                    funder = funder + ', ' + funderIdentifier.text 
+
+                extra_fields.append({
+                    "value" : funder,
+                    "key" : "funder"
+                })
+
+    extra_fields.append({
+        "value" : 'https://wfsi-data.org/view/' + doi_id,
+        "key" : 'Source'
+    })
 
     # parse name for validity 
     name = None
@@ -145,7 +231,7 @@ for res in results:
 
     if ',' in name:
         name = name.replace(',', "")
-
+    
     if len(name) > 100:
         name = name[:100]
 
@@ -153,6 +239,20 @@ for res in results:
     name = name.replace(' ', '_')
     name = name.replace('.', '')
     print(name)
+
+    intellectualRights = dataset.find('intellectualRights')  
+    license_id = None
+    license_title = None
+    license_url = None
+
+    if intellectualRights is not None:            
+        license_info = intellectualRights.find('para').text
+        if 'Creative Commons Universal 1.0' in license_info:
+            license_id = 'CC0-1.0'
+            
+        if 'Creative Commons Attribution 4.0' in license_info:
+            license_id = 'CC-BY-4.0'
+
 
     # extract resources
     resources = dataset.findall('otherEntity')
@@ -174,13 +274,22 @@ for res in results:
         if resource_name.endswith('.txt'):
             format = 'TXT'
 
-        resource_json.append({
+        resource_info = {
             "resource_name" : resource_name,
             "resource_type" : resource_type,
             "resource_url" : resource_url,
-            "format" : format
-        })
+            "format" : format,
+        }
 
+        if license is not None:
+            resource_info['license_id'] = license
+
+
+        resource_json.append(resource_info)
+
+
+    # delete previous version
+    ckan.action.package_delete(id=name)
 
     # save package
     try: 
@@ -189,7 +298,8 @@ for res in results:
                                         owner_org = 'wfsi',
                                         extras=extra_fields,
                                         notes = notes,
-                                        tags=tags
+                                        tags=tags,
+                                        license_id=license_id
                                     )
     except Exception as e:
         print(name)
